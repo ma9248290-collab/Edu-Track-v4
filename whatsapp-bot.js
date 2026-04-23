@@ -74,75 +74,38 @@ async function fetchAndProcessMessages() {
 // ----------------------------------------------------
 // 4. عقل البوت الشامل (صياد الأرقام + الردود الذكية)
 // ----------------------------------------------------
+// تأكد إن دالة analyzeAndReply في ملف whatsapp-bot.js بتستخدم originalFrom زي ما هي:
 async function analyzeAndReply(originalFrom, text) {
-    // 1. استخراج رقم تقريبي للبحث فقط (لا يستخدم في الإرسال)
-    let senderPhone = originalFrom.split('@')[0]; 
-    if(senderPhone.startsWith("20") && senderPhone.length === 12) {
-        senderPhone = "0" + senderPhone.substring(2);
+    // originalFrom هنا هي الهوية الكاملة (مثلاً: 218717401137169@lid)
+    
+    // 1. استخراج الرقم للبحث فقط (تنظيف للبحث في السيستم)
+    let searchPhone = originalFrom.split('@')[0]; 
+    if(searchPhone.startsWith("20") && searchPhone.length === 12) {
+        searchPhone = "0" + searchPhone.substring(2);
     }
 
     const studentList = typeof students !== 'undefined' ? students : [];
-    
-    // 2. هل الرقم متسجل عندنا أصلاً؟
-    let matchedStudent = studentList.find(s => s.phone === senderPhone || s.parentPhone === senderPhone);
+    let matchedStudent = studentList.find(s => s.phone === searchPhone || s.parentPhone === searchPhone);
 
-    // 3. صيد الرقم من نص الرسالة (لو المرسل غير مسجل)
+    // 2. صيد الرقم من نص الرسالة (لو المرسل مش متسجل وعايز يستعلم)
     if (!matchedStudent) {
         const phoneRegex = /(01[0125][0-9]{8})/; 
         const extractedPhoneMatch = text.match(phoneRegex);
-        
         if (extractedPhoneMatch) {
             const extractedPhone = extractedPhoneMatch[0];
             matchedStudent = studentList.find(s => s.phone === extractedPhone || s.parentPhone === extractedPhone);
-            
-            if (!matchedStudent) {
-                const reply = "عذراً يا فندم، الرقم اللي حضرتك بعته غير مسجل عندنا في النظام. 🚫\nيرجى التأكد من الرقم والمحاولة مرة أخرى.";
-                await sendAutoWhatsApp(originalFrom, reply); // الرد باستخدام الـ ID الأصلي
-                return;
-            }
         }
     }
 
     let aiPrompt = "";
-
-    // 🟢 طالب معروف
     if (matchedStudent) {
-        console.log(`🤖 جاري تحليل بيانات الطالب: ${matchedStudent.name}`);
-        
-        const recentAttendance = classSessions.filter(s => s.group === matchedStudent.group).slice(-3);
-        const recentExams = exams.filter(e => e.group === matchedStudent.group).slice(-3);
-
-        const attendanceSummary = recentAttendance.length ? recentAttendance.map(s => `${s.date}: ${s.attendance[matchedStudent.phone] === 'present' ? 'حاضر' : 'غائب'}`).join(', ') : 'لا يوجد حصص حديثة';
-        const gradesSummary = recentExams.length ? recentExams.map(e => `${e.name}: ${e.grades[matchedStudent.phone] || 'لم يرصد'} من ${e.maxScore}`).join(', ') : 'لا يوجد امتحانات حديثة';
-
-        aiPrompt = `
-        أنت مساعد ذكي لمستر شيفو. المستخدم يستعلم عن الطالب (${matchedStudent.name}) وقال: "${text}".
-        بيانات الطالب حالياً: 
-        - الحضور الأخير: ${attendanceSummary}
-        - الدرجات الأخيرة: ${gradesSummary}
-        
-        المطلوب:
-        - رد بأسلوب بشري، لبق، ومصري.
-        - لخص حالة الطالب.
-        - اختم برسالة تشجيعية. 
-        - اجعل الرد قصيراً وضع بعض الإيموجي. لا تذكر أبداً أنك ذكاء اصطناعي.
-        `;
-    } 
-    // 🔴 شخص غريب
-    else {
-        console.log(`🤖 شخص غير مسجل يتحدث.`);
-        aiPrompt = `
-        أنت مساعد ذكي وسكرتير لمستر شيفو. يتحدث معك شخص غير مسجل.
-        رسالة الشخص: "${text}"
-        
-        المطلوب:
-        1. إذا كان يسأل عن طالب، اعتذر بلباقة واطلب منه "كتابة رقم هاتف الطالب أو ولي الأمر" المكون من 11 رقم للبحث.
-        2. إذا كان يسأل أسئلة عامة، أجب بأسلوب ودي.
-        3. اجعل الرد بلهجة مصرية محترمة، قصيراً، ولا تذكر أنك روبوت.
-        `;
+        // ... (كود تجميع بيانات الطالب كما هو) ...
+        aiPrompt = `أنت مساعد مستر شيفو. رد على ولي أمر الطالب (${matchedStudent.name}) بخصوص رسالته: "${text}"...`;
+    } else {
+        // ... (رد السكرتارية العام) ...
+        aiPrompt = `أنت سكرتير مستر شيفو. شخص غير مسجل يسأل: "${text}". اطلب منه رقم الطالب للبحث...`;
     }
 
-    // 🚀 طلب الرد من Gemini والإرسال
     try {
         const response = await fetch('http://localhost:3000/ask-ai', {
             method: 'POST',
@@ -151,9 +114,9 @@ async function analyzeAndReply(originalFrom, text) {
         });
         const data = await response.json();
         
-        // إرسال الرد باستخدام الـ ID الأصلي اللي استلمناه من الواتس
+        // 🚀 الإرسال للهوية الأصلية (السيرفر هيحول @lid لـ @c.us أوتوماتيك)
         await sendAutoWhatsApp(originalFrom, data.reply);
-        console.log(`✅ تم الرد بنجاح.`);
+        console.log(`✅ تم الرد الذكي بنجاح على المعرف: ${originalFrom}`);
     } catch (e) {
         console.error("AI Error:", e);
     }

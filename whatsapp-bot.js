@@ -13,12 +13,16 @@ function getRandomGreeting() {
 }
 
 // ----------------------------------------------------
-// 1. دالة الإرسال (مربوطة بالسيرفر المحلي 3000)
+// 1. دالة الإرسال (ذكية في التعامل مع الأرقام الدولية)
 // ----------------------------------------------------
 async function sendAutoWhatsApp(phone, message) {
-    let formattedPhone = phone;
-    if (phone.startsWith("0")) formattedPhone = "20" + phone.substring(1);
-    else if (!phone.startsWith("20")) formattedPhone = "20" + phone;
+    let formattedPhone = String(phone).trim();
+    
+    // لو الرقم مصري بيبدأ بـ 0 (زي 010 أو 011).. نحوله لدولي
+    if (formattedPhone.startsWith("0") && formattedPhone.length === 11) {
+        formattedPhone = "20" + formattedPhone.substring(1);
+    } 
+    // لو الرقم دولي جاهز (زي 218) هنسيبه زي ما هو من غير ما نلعب فيه
 
     try {
         let response = await fetch('http://localhost:3000/send', {
@@ -28,11 +32,10 @@ async function sendAutoWhatsApp(phone, message) {
         });
         return response.ok;
     } catch(e) { 
-        console.error("خطأ في الاتصال بالسيرفر المحلي:", e);
+        console.error("خطأ في الاتصال بالسيرفر:", e);
         return false; 
     }
 }
-
 // ----------------------------------------------------
 // 2. تشغيل وإيقاف البوت من لوحة التحكم
 // ----------------------------------------------------

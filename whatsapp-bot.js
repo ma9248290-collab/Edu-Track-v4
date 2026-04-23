@@ -88,48 +88,44 @@ async function analyzeAndReply(fromPhone, text) {
     let phone = fromPhone.split('@')[0];
     if(phone.startsWith("20")) phone = "0" + phone.substring(2);
 
-    // البحث عن الطالب في بيانات script.js
     const student = students.find(s => s.phone === phone || s.parentPhone === phone);
-    const q = text.toLowerCase().replace(/[أإآا]/g, 'ا').replace(/ة/g, 'ه').replace(/[يى]/g, 'ي');
-    let reply = "";
+    if(!student) return; // يمكن إضافة رد عام هنا للأرقام غير المسجلة
 
-    if(!student) {
-        if(q.length > 2) {
-            reply = `أهلاً بك يا فندم 🌟\nمعاك المساعد الآلي لسنتر مستر شيفو 🤖.\n\nعذراً، هذا الرقم غير مسجل لدينا.\nبرجاء التواصل مع السكرتارية لتسجيل بيانات الطالب لتفعيل الخدمة الآلية.`;
-            await sendAutoWhatsApp(phone, reply);
-        }
-        return;
-    }
+    // 1. تجميع بيانات الطالب الحالية من السيستم
+    const recentAttendance = classSessions.filter(s => s.group === student.group).slice(-3);
+    const recentExams = exams.filter(e => e.group === student.group).slice(-3);
 
-    const isGreeting = /(سلام|ازيك|مرحبا|اهلا|مستر|شيفو|عامل ايه)/.test(q);
-    const isGrades = /(درجه|نتيجه|امتحان|مستوى|جاب|نمر)/.test(q);
-    const isAttendance = /(حضور|غياب|حضر|غاب|موجود|مجاش)/.test(q);
+    const attendanceSummary = recentAttendance.map(s => `${s.date}: ${s.attendance[student.phone] === 'present' ? 'حاضر' : 'غائب'}`).join(', ');
+    const gradesSummary = recentExams.map(e => `${e.name}: ${e.grades[student.phone] || 'لم يرصد'} من ${e.maxScore}`).join(', ');
 
-    if (isGreeting && !isGrades && !isAttendance) {
-        reply = `${getRandomGreeting()} 🌟\nأنا المساعد الذكي لمستر شيفو. أقدر أساعدك بخصوص الطالب: *${student.name}*؟\n\n(اسألني عن: مستواه، درجاته، أو حضوره)`;
-    } else {
-        reply = `تقرير الطالب: *${student.name}* 🎓\n\n`;
-        let understood = false;
+    // 2. بناء "الأمر" (Prompt) للذكاء الاصطناعي
+    const aiPrompt = `
+    أنت مساعد ذكي لمستر شيفو. ولي أمر الطالب ${student.name} أرسل رسالة نصها: "${text}".
+    بيانات الطالب لدينا: 
+    - الحضور الأخير: ${attendanceSummary}
+    - الدرجات الأخيرة: ${gradesSummary}
+    
+    المطلوب: رد على ولي الأمر بأسلوب بشري، لبق، واحترافي. 
+    - إذا سأل عن الدرجات أو الغياب، لخص له البيانات بوضوح.
+    - إذا كانت الدرجات ضعيفة، قدم نصيحة رقيقة بضرورة الاهتمام.
+    - اجعل الرد قصيراً ومنسقاً بالإيموجي. لا تذكر أنك ذكاء اصطناعي.
+    `;
 
-        if(isAttendance) {
-            understood = true;
-            const groupSessions = classSessions.filter(s => s.group === student.group).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,3);
-            reply += "📋 *سجل الحضور:* \n" + (groupSessions.length ? groupSessions.map(s => `- ${s.date}: ${s.attendance[student.phone] === 'present' ? 'حاضر ✅' : 'غائب ❌'}`).join('\n') : "لا توجد حصص مسجلة.") + "\n\n";
-        }
-        if(isGrades) {
-            understood = true;
-            const groupExams = exams.filter(e => e.group === student.group).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,3);
-            reply += "⭐ *آخر الدرجات:* \n" + (groupExams.length ? groupExams.map(e => `- ${e.name}: ${e.grades[student.phone] || 'لم يرصد'} / ${e.maxScore}`).join('\n') : "لا توجد امتحانات مسجلة.") + "\n\n";
-        }
+    // 3. طلب الرد من السيرفر (Gemini)
+    try {
+        const response = await fetch('http://localhost:3000/ask-ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: aiPrompt })
+        });
+        const data = await response.json();
         
-        if(!understood) reply = `أهلاً بك يا فندم 🤖\nلقد استلمت رسالتك بخصوص *${student.name}*.\nبرجاء كتابة (الدرجات) أو (الغياب) لعرض التقرير فوراً، أو انتظر رد السكرتارية.`;
+        // 4. إرسال الرد النهائي للواتساب
+        await sendAutoWhatsApp(phone, data.reply);
+    } catch (e) {
+        console.error("AI Error:", e);
     }
-
-    await sendAutoWhatsApp(phone, reply);
-    console.log(`🤖 تم الرد آلياً عبر السيرفر المحلي على: ${student.name}`);
-    await sleep(2000); 
 }
-
 
 // استدعاء مكتبة توليد QR الصور (تضاف في index.html أفضل ولكن سنضعها هنا للسهولة)
 if (!document.getElementById('qrScript')) {

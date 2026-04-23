@@ -1,34 +1,21 @@
 // ==========================================
-// 🤖 ملف المساعد الآلي (EduBot AI) - نسخة السيرفر المحلي
+// 🤖 ملف المساعد الآلي (EduBot AI) - النسخة الشاملة
 // ==========================================
 
 let waBotInterval = null;
 let processedMsgs = JSON.parse(localStorage.getItem("processedMsgs")) || [];
 
-// دوال مساعدة للحماية
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-function getRandomGreeting() {
-    const greetings = ["أهلاً بحضرتك", "مرحباً بك", "تحياتي", "السلام عليكم", "أهلاً وسهلاً"];
-    return greetings[Math.floor(Math.random() * greetings.length)];
-}
 
 // ----------------------------------------------------
-// 1. دالة الإرسال (ذكية في التعامل مع الأرقام الدولية)
+// 1. دالة الإرسال (بتاخد الـ ID الأصلي بدون أي تعديل)
 // ----------------------------------------------------
-async function sendAutoWhatsApp(phone, message) {
-    let formattedPhone = String(phone).trim();
-    
-    // لو الرقم مصري بيبدأ بـ 0 (زي 010 أو 011).. نحوله لدولي
-    if (formattedPhone.startsWith("0") && formattedPhone.length === 11) {
-        formattedPhone = "20" + formattedPhone.substring(1);
-    } 
-    // لو الرقم دولي جاهز (زي 218) هنسيبه زي ما هو من غير ما نلعب فيه
-
+async function sendAutoWhatsApp(chatId, message) {
     try {
         let response = await fetch('http://localhost:3000/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: formattedPhone, message: message })
+            body: JSON.stringify({ phone: chatId, message: message }) // إرسال الـ ID الخام
         });
         return response.ok;
     } catch(e) { 
@@ -36,8 +23,9 @@ async function sendAutoWhatsApp(phone, message) {
         return false; 
     }
 }
+
 // ----------------------------------------------------
-// 2. تشغيل وإيقاف البوت من لوحة التحكم
+// 2. تشغيل وإيقاف البوت
 // ----------------------------------------------------
 function toggleWaBot() {
     const btn = document.getElementById("waBotBtn");
@@ -50,12 +38,11 @@ function toggleWaBot() {
         btn.style.color = "#10b981"; btn.style.borderColor = "#10b981"; btn.style.background = "rgba(16, 185, 129, 0.1)";
         showToast("تم إيقاف المساعد الآلي 🛑", "error");
     } else {
-        // فحص سريع إذا كان السيرفر (Node.js) مفتوح أصلاً
         fetch('http://localhost:3000/messages').then(() => {
-            waBotInterval = setInterval(fetchAndProcessMessages, 10000); // فحص كل 10 ثواني
+            waBotInterval = setInterval(fetchAndProcessMessages, 8000); 
             btn.innerHTML = "البوت يعمل (محلي) 🟢";
             btn.style.color = "#ef4444"; btn.style.borderColor = "#ef4444"; btn.style.background = "rgba(239, 68, 68, 0.1)";
-            showToast("المساعد الآلي متصل بالسيرفر المحلي بنجاح 🚀");
+            showToast("المساعد الآلي متصل بالسيرفر بنجاح 🚀");
         }).catch(() => {
             showToast("السيرفر المحلي (Node.js) مغلق! افتحه أولاً", "error");
         });
@@ -63,7 +50,7 @@ function toggleWaBot() {
 }
 
 // ----------------------------------------------------
-// 3. سحب الرسائل من السيرفر وتحليلها
+// 3. سحب الرسائل
 // ----------------------------------------------------
 async function fetchAndProcessMessages() {
     try {
@@ -77,35 +64,30 @@ async function fetchAndProcessMessages() {
                 if(processedMsgs.length > 500) processedMsgs.shift(); 
                 localStorage.setItem("processedMsgs", JSON.stringify(processedMsgs));
 
-                // استدعاء عقل البوت للرد
+                // msg.from هو الـ ID الخام (مثال: 218717401137169@c.us)
                 await analyzeAndReply(msg.from, msg.body);
             }
         }
-    } catch(e) { /* السيرفر مغلق حالياً */ }
+    } catch(e) {}
 }
 
 // ----------------------------------------------------
-// 4. عقل البوت (تحليل النية والرد البشري)
+// 4. عقل البوت الشامل (صياد الأرقام + الردود الذكية)
 // ----------------------------------------------------
-// ----------------------------------------------------
-// 4. عقل البوت الشامل (المحاكي للسكرتير البشري)
-// ----------------------------------------------------
-async function analyzeAndReply(fromPhone, text) {
-    let senderPhone = fromPhone.split('@')[0]; // رقم اللي بيبعت الرسالة
-    
-    // تنظيف رقم المرسل
+async function analyzeAndReply(originalFrom, text) {
+    // 1. استخراج رقم تقريبي للبحث فقط (لا يستخدم في الإرسال)
+    let senderPhone = originalFrom.split('@')[0]; 
     if(senderPhone.startsWith("20") && senderPhone.length === 12) {
         senderPhone = "0" + senderPhone.substring(2);
     }
 
     const studentList = typeof students !== 'undefined' ? students : [];
     
-    // 1. هل رقم اللي بيبعت ده متسجل عندنا أصلاً؟
+    // 2. هل الرقم متسجل عندنا أصلاً؟
     let matchedStudent = studentList.find(s => s.phone === senderPhone || s.parentPhone === senderPhone);
 
-    // 2. لو مش متسجل.. هل هو باعت رقم تليفون جوه الرسالة عشان يستعلم بيه؟
+    // 3. صيد الرقم من نص الرسالة (لو المرسل غير مسجل)
     if (!matchedStudent) {
-        // فلتر بيصطاد أي رقم موبايل مصري جوه الكلام
         const phoneRegex = /(01[0125][0-9]{8})/; 
         const extractedPhoneMatch = text.match(phoneRegex);
         
@@ -113,10 +95,9 @@ async function analyzeAndReply(fromPhone, text) {
             const extractedPhone = extractedPhoneMatch[0];
             matchedStudent = studentList.find(s => s.phone === extractedPhone || s.parentPhone === extractedPhone);
             
-            // لو بعت رقم بس طلع مش في السيستم
             if (!matchedStudent) {
                 const reply = "عذراً يا فندم، الرقم اللي حضرتك بعته غير مسجل عندنا في النظام. 🚫\nيرجى التأكد من الرقم والمحاولة مرة أخرى.";
-                await sendAutoWhatsApp(senderPhone, reply);
+                await sendAutoWhatsApp(originalFrom, reply); // الرد باستخدام الـ ID الأصلي
                 return;
             }
         }
@@ -124,7 +105,7 @@ async function analyzeAndReply(fromPhone, text) {
 
     let aiPrompt = "";
 
-    // 🟢 الحالة الأولى: عرفنا الطالب (سواء من رقم المرسل، أو الرقم اللي استخرجناه من رسالته)
+    // 🟢 طالب معروف
     if (matchedStudent) {
         console.log(`🤖 جاري تحليل بيانات الطالب: ${matchedStudent.name}`);
         
@@ -142,26 +123,26 @@ async function analyzeAndReply(fromPhone, text) {
         
         المطلوب:
         - رد بأسلوب بشري، لبق، ومصري.
-        - لخص حالة الطالب (حاضر ولا غايب، درجاته حلوة ولا وحشة).
+        - لخص حالة الطالب.
         - اختم برسالة تشجيعية. 
         - اجعل الرد قصيراً وضع بعض الإيموجي. لا تذكر أبداً أنك ذكاء اصطناعي.
         `;
     } 
-    // 🔴 الحالة الثانية: شخص غريب بيسأل سؤال عام أو بيطلب نتيجة ولسه مبعتش رقم
+    // 🔴 شخص غريب
     else {
-        console.log(`🤖 شخص غير مسجل يتحدث: ${senderPhone}`);
+        console.log(`🤖 شخص غير مسجل يتحدث.`);
         aiPrompt = `
-        أنت مساعد ذكي وسكرتير لمستر شيفو. يتحدث معك شخص رقمه غير مسجل.
+        أنت مساعد ذكي وسكرتير لمستر شيفو. يتحدث معك شخص غير مسجل.
         رسالة الشخص: "${text}"
         
         المطلوب:
-        1. إذا كان يسأل عن طالب (مستواه، نتيجته، حضوره)، اعتذر له بلباقة واطلب منه "كتابة رقم هاتف الطالب أو ولي الأمر" المكون من 11 رقم للبحث في النظام.
-        2. إذا كان يسأل أسئلة عامة (من أنت، تفاصيل الدروس، كيف أعمل سكان)، أجب بأسلوب ودي ولطيف كموظف خدمة عملاء.
-        3. اجعل الرد بلهجة مصرية محترمة، قصيراً، ولا تذكر أنك روبوت أو ذكاء اصطناعي.
+        1. إذا كان يسأل عن طالب، اعتذر بلباقة واطلب منه "كتابة رقم هاتف الطالب أو ولي الأمر" المكون من 11 رقم للبحث.
+        2. إذا كان يسأل أسئلة عامة، أجب بأسلوب ودي.
+        3. اجعل الرد بلهجة مصرية محترمة، قصيراً، ولا تذكر أنك روبوت.
         `;
     }
 
-    // 🚀 إرسال الأمر لعقل Gemini في السيرفر
+    // 🚀 طلب الرد من Gemini والإرسال
     try {
         const response = await fetch('http://localhost:3000/ask-ai', {
             method: 'POST',
@@ -170,54 +151,10 @@ async function analyzeAndReply(fromPhone, text) {
         });
         const data = await response.json();
         
-        await sendAutoWhatsApp(senderPhone, data.reply);
-        console.log(`✅ تم الرد الذكي بنجاح.`);
+        // إرسال الرد باستخدام الـ ID الأصلي اللي استلمناه من الواتس
+        await sendAutoWhatsApp(originalFrom, data.reply);
+        console.log(`✅ تم الرد بنجاح.`);
     } catch (e) {
         console.error("AI Error:", e);
     }
 }
-// استدعاء مكتبة توليد QR الصور (تضاف في index.html أفضل ولكن سنضعها هنا للسهولة)
-if (!document.getElementById('qrScript')) {
-    let script = document.createElement('script');
-    script.id = 'qrScript';
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
-    document.head.appendChild(script);
-}
-
-// فحص حالة السيرفر وتحديث النافذة تلقائياً
-setInterval(async () => {
-    const nodeStatus = document.getElementById("nodeStatus");
-    const waStatus = document.getElementById("waStatus");
-    const qrContainer = document.getElementById("qrContainer");
-    const qrImage = document.getElementById("qrImage");
-
-    if(!nodeStatus) return;
-
-    try {
-        const response = await fetch('http://localhost:3000/status');
-        const data = await response.json();
-        
-        nodeStatus.innerHTML = '<span class="status-online">● يعمل (Online)</span>';
-        
-        if (data.status === 'connected') {
-            waStatus.innerHTML = '<span class="status-online">متصل ✅</span>';
-            qrContainer.style.display = "none";
-        } else if (data.status === 'need_scan') {
-            waStatus.innerHTML = '<span class="status-offline">بانتظار المسح 📱</span>';
-            qrContainer.style.display = "block";
-            // جلب كود الـ QR وعرضه
-            const qrResp = await fetch('http://localhost:3000/qr');
-            const qrData = await qrResp.json();
-            if (qrData.qr) {
-                qrImage.innerHTML = "";
-                new QRCode(qrImage, { text: qrData.qr, width: 200, height: 200 });
-            }
-        } else {
-            waStatus.innerHTML = 'جاري التهيئة...';
-        }
-    } catch (e) {
-        nodeStatus.innerHTML = '<span class="status-offline">● متوقف (Offline)</span>';
-        waStatus.innerHTML = '---';
-        qrContainer.style.display = "none";
-    }
-}, 5000);

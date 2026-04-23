@@ -84,34 +84,81 @@ async function fetchAndProcessMessages() {
 // ----------------------------------------------------
 // 4. عقل البوت (تحليل النية والرد البشري)
 // ----------------------------------------------------
+// ----------------------------------------------------
+// 4. عقل البوت الشامل (المحاكي للسكرتير البشري)
+// ----------------------------------------------------
 async function analyzeAndReply(fromPhone, text) {
-    let phone = fromPhone.split('@')[0];
-    if(phone.startsWith("20")) phone = "0" + phone.substring(2);
-
-    const student = students.find(s => s.phone === phone || s.parentPhone === phone);
-    if(!student) return; // يمكن إضافة رد عام هنا للأرقام غير المسجلة
-
-    // 1. تجميع بيانات الطالب الحالية من السيستم
-    const recentAttendance = classSessions.filter(s => s.group === student.group).slice(-3);
-    const recentExams = exams.filter(e => e.group === student.group).slice(-3);
-
-    const attendanceSummary = recentAttendance.map(s => `${s.date}: ${s.attendance[student.phone] === 'present' ? 'حاضر' : 'غائب'}`).join(', ');
-    const gradesSummary = recentExams.map(e => `${e.name}: ${e.grades[student.phone] || 'لم يرصد'} من ${e.maxScore}`).join(', ');
-
-    // 2. بناء "الأمر" (Prompt) للذكاء الاصطناعي
-    const aiPrompt = `
-    أنت مساعد ذكي لمستر شيفو. ولي أمر الطالب ${student.name} أرسل رسالة نصها: "${text}".
-    بيانات الطالب لدينا: 
-    - الحضور الأخير: ${attendanceSummary}
-    - الدرجات الأخيرة: ${gradesSummary}
+    let senderPhone = fromPhone.split('@')[0]; // رقم اللي بيبعت الرسالة
     
-    المطلوب: رد على ولي الأمر بأسلوب بشري، لبق، واحترافي. 
-    - إذا سأل عن الدرجات أو الغياب، لخص له البيانات بوضوح.
-    - إذا كانت الدرجات ضعيفة، قدم نصيحة رقيقة بضرورة الاهتمام.
-    - اجعل الرد قصيراً ومنسقاً بالإيموجي. لا تذكر أنك ذكاء اصطناعي.
-    `;
+    // تنظيف رقم المرسل
+    if(senderPhone.startsWith("20") && senderPhone.length === 12) {
+        senderPhone = "0" + senderPhone.substring(2);
+    }
 
-    // 3. طلب الرد من السيرفر (Gemini)
+    const studentList = typeof students !== 'undefined' ? students : [];
+    
+    // 1. هل رقم اللي بيبعت ده متسجل عندنا أصلاً؟
+    let matchedStudent = studentList.find(s => s.phone === senderPhone || s.parentPhone === senderPhone);
+
+    // 2. لو مش متسجل.. هل هو باعت رقم تليفون جوه الرسالة عشان يستعلم بيه؟
+    if (!matchedStudent) {
+        // فلتر بيصطاد أي رقم موبايل مصري جوه الكلام
+        const phoneRegex = /(01[0125][0-9]{8})/; 
+        const extractedPhoneMatch = text.match(phoneRegex);
+        
+        if (extractedPhoneMatch) {
+            const extractedPhone = extractedPhoneMatch[0];
+            matchedStudent = studentList.find(s => s.phone === extractedPhone || s.parentPhone === extractedPhone);
+            
+            // لو بعت رقم بس طلع مش في السيستم
+            if (!matchedStudent) {
+                const reply = "عذراً يا فندم، الرقم اللي حضرتك بعته غير مسجل عندنا في النظام. 🚫\nيرجى التأكد من الرقم والمحاولة مرة أخرى.";
+                await sendAutoWhatsApp(senderPhone, reply);
+                return;
+            }
+        }
+    }
+
+    let aiPrompt = "";
+
+    // 🟢 الحالة الأولى: عرفنا الطالب (سواء من رقم المرسل، أو الرقم اللي استخرجناه من رسالته)
+    if (matchedStudent) {
+        console.log(`🤖 جاري تحليل بيانات الطالب: ${matchedStudent.name}`);
+        
+        const recentAttendance = classSessions.filter(s => s.group === matchedStudent.group).slice(-3);
+        const recentExams = exams.filter(e => e.group === matchedStudent.group).slice(-3);
+
+        const attendanceSummary = recentAttendance.length ? recentAttendance.map(s => `${s.date}: ${s.attendance[matchedStudent.phone] === 'present' ? 'حاضر' : 'غائب'}`).join(', ') : 'لا يوجد حصص حديثة';
+        const gradesSummary = recentExams.length ? recentExams.map(e => `${e.name}: ${e.grades[matchedStudent.phone] || 'لم يرصد'} من ${e.maxScore}`).join(', ') : 'لا يوجد امتحانات حديثة';
+
+        aiPrompt = `
+        أنت مساعد ذكي لمستر شيفو. المستخدم يستعلم عن الطالب (${matchedStudent.name}) وقال: "${text}".
+        بيانات الطالب حالياً: 
+        - الحضور الأخير: ${attendanceSummary}
+        - الدرجات الأخيرة: ${gradesSummary}
+        
+        المطلوب:
+        - رد بأسلوب بشري، لبق، ومصري.
+        - لخص حالة الطالب (حاضر ولا غايب، درجاته حلوة ولا وحشة).
+        - اختم برسالة تشجيعية. 
+        - اجعل الرد قصيراً وضع بعض الإيموجي. لا تذكر أبداً أنك ذكاء اصطناعي.
+        `;
+    } 
+    // 🔴 الحالة الثانية: شخص غريب بيسأل سؤال عام أو بيطلب نتيجة ولسه مبعتش رقم
+    else {
+        console.log(`🤖 شخص غير مسجل يتحدث: ${senderPhone}`);
+        aiPrompt = `
+        أنت مساعد ذكي وسكرتير لمستر شيفو. يتحدث معك شخص رقمه غير مسجل.
+        رسالة الشخص: "${text}"
+        
+        المطلوب:
+        1. إذا كان يسأل عن طالب (مستواه، نتيجته، حضوره)، اعتذر له بلباقة واطلب منه "كتابة رقم هاتف الطالب أو ولي الأمر" المكون من 11 رقم للبحث في النظام.
+        2. إذا كان يسأل أسئلة عامة (من أنت، تفاصيل الدروس، كيف أعمل سكان)، أجب بأسلوب ودي ولطيف كموظف خدمة عملاء.
+        3. اجعل الرد بلهجة مصرية محترمة، قصيراً، ولا تذكر أنك روبوت أو ذكاء اصطناعي.
+        `;
+    }
+
+    // 🚀 إرسال الأمر لعقل Gemini في السيرفر
     try {
         const response = await fetch('http://localhost:3000/ask-ai', {
             method: 'POST',
@@ -120,13 +167,12 @@ async function analyzeAndReply(fromPhone, text) {
         });
         const data = await response.json();
         
-        // 4. إرسال الرد النهائي للواتساب
-        await sendAutoWhatsApp(phone, data.reply);
+        await sendAutoWhatsApp(senderPhone, data.reply);
+        console.log(`✅ تم الرد الذكي بنجاح.`);
     } catch (e) {
         console.error("AI Error:", e);
     }
 }
-
 // استدعاء مكتبة توليد QR الصور (تضاف في index.html أفضل ولكن سنضعها هنا للسهولة)
 if (!document.getElementById('qrScript')) {
     let script = document.createElement('script');
